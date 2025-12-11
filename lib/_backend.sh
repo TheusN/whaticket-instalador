@@ -139,21 +139,23 @@ backend_update() {
 
   sleep 2
 
+  # Fix git safe directory issue
+  sudo git config --global --add safe.directory /home/deploy/${empresa_atualizar}
+
   sudo su - deploy <<EOF
   cd /home/deploy/${empresa_atualizar}
-  pm2 stop ${empresa_atualizar}-backend
+  pm2 stop ${empresa_atualizar}-backend || true
+  git config --global --add safe.directory /home/deploy/${empresa_atualizar}
   git pull
   cd /home/deploy/${empresa_atualizar}/backend
-  npm install
-  npm update -f
-  npm install @types/fs-extra
-  rm -rf dist 
+  npm install --force
+  rm -rf dist
   npm run build
   npx sequelize db:migrate
   npx sequelize db:migrate
-  npx sequelize db:seed
+  npx sequelize db:seed:all
   pm2 start ${empresa_atualizar}-backend
-  pm2 save 
+  pm2 save
 EOF
 
   sleep 2
