@@ -1,0 +1,25 @@
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE
+*.idea
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+.sistema_rodando.tmp
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Backup files
+*.bak
+*~
