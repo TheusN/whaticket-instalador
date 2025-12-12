@@ -542,3 +542,119 @@ EOF
 
   sleep 2
 }
+
+#######################################
+# configures traefik routes for whaticket
+# (for servers using Easypanel/Traefik)
+# Arguments:
+#   None
+#######################################
+system_traefik_setup() {
+  print_banner
+  printf "${WHITE} 💻 Configurando Traefik para Whaticket...${GRAY_LIGHT}"
+  printf "\n\n"
+
+  sleep 2
+
+  TRAEFIK_CONFIG="/etc/easypanel/traefik/config/main.yaml"
+
+  # Check if Traefik config exists (Easypanel server)
+  if [[ ! -f "$TRAEFIK_CONFIG" ]]; then
+    printf "${WHITE} ⚠️ Traefik não encontrado. Pulando configuração...${GRAY_LIGHT}\n"
+    return 0
+  fi
+
+  # Check if routes already exist
+  if grep -q "whaticket-frontend-0" "$TRAEFIK_CONFIG" 2>/dev/null; then
+    printf "${WHITE} ✅ Rotas do Traefik já configuradas.${GRAY_LIGHT}\n"
+    return 0
+  fi
+
+  frontend_domain=$(echo "${frontend_url/https:\/\/}")
+  backend_domain=$(echo "${backend_url/https:\/\/}")
+
+  # Get nginx ports from config
+  nginx_frontend_port="${frontend_port:-8080}"
+  nginx_backend_port="${backend_port:-8081}"
+
+  # Backup original config
+  cp "$TRAEFIK_CONFIG" "${TRAEFIK_CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+
+  # Add routers and services using python for JSON manipulation
+  python3 << PYEOF
+import json
+
+with open("$TRAEFIK_CONFIG", "r") as f:
+    config = json.load(f)
+
+# Add routers
+config["http"]["routers"]["http-whaticket-frontend-0"] = {
+    "service": "whaticket-frontend-0",
+    "rule": "Host(\`$frontend_domain\`) && PathPrefix(\`/\`)",
+    "priority": 0,
+    "middlewares": ["redirect-to-https", "bad-gateway-error-page"],
+    "entryPoints": ["http"]
+}
+
+config["http"]["routers"]["https-whaticket-frontend-0"] = {
+    "service": "whaticket-frontend-0",
+    "rule": "Host(\`$frontend_domain\`) && PathPrefix(\`/\`)",
+    "priority": 0,
+    "middlewares": ["bad-gateway-error-page"],
+    "tls": {
+        "certResolver": "letsencrypt",
+        "domains": [{"main": "$frontend_domain"}]
+    },
+    "entryPoints": ["https"]
+}
+
+config["http"]["routers"]["http-whaticket-backend-0"] = {
+    "service": "whaticket-backend-0",
+    "rule": "Host(\`$backend_domain\`) && PathPrefix(\`/\`)",
+    "priority": 0,
+    "middlewares": ["redirect-to-https", "bad-gateway-error-page"],
+    "entryPoints": ["http"]
+}
+
+config["http"]["routers"]["https-whaticket-backend-0"] = {
+    "service": "whaticket-backend-0",
+    "rule": "Host(\`$backend_domain\`) && PathPrefix(\`/\`)",
+    "priority": 0,
+    "middlewares": ["bad-gateway-error-page"],
+    "tls": {
+        "certResolver": "letsencrypt",
+        "domains": [{"main": "$backend_domain"}]
+    },
+    "entryPoints": ["https"]
+}
+
+# Add services
+config["http"]["services"]["whaticket-frontend-0"] = {
+    "loadBalancer": {
+        "servers": [{"url": "http://172.17.0.1:$nginx_frontend_port/"}],
+        "passHostHeader": True
+    }
+}
+
+config["http"]["services"]["whaticket-backend-0"] = {
+    "loadBalancer": {
+        "servers": [{"url": "http://172.17.0.1:$nginx_backend_port/"}],
+        "passHostHeader": True
+    }
+}
+
+with open("$TRAEFIK_CONFIG", "w") as f:
+    json.dump(config, f, indent=2)
+
+print("Traefik configurado com sucesso!")
+PYEOF
+
+  # Restart Traefik to apply changes
+  TRAEFIK_CONTAINER=\$(docker ps -q -f name=traefik 2>/dev/null)
+  if [[ -n "\$TRAEFIK_CONTAINER" ]]; then
+    docker restart "\$TRAEFIK_CONTAINER"
+    printf "${WHITE} ✅ Traefik reiniciado com sucesso!${GRAY_LIGHT}\n"
+  fi
+
+  sleep 2
+}
